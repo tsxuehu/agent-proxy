@@ -23,14 +23,22 @@ func userID(r *http.Request) string {
 func (s Server) userOnly(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		token := app.Bearer(r.Header.Get("Authorization"))
-		if !strings.HasPrefix(token, "apu_") || len(token) > 128 {
-			problem(w, 401, "invalid portal token")
-			return
+		var user string
+		var err error
+		if authorization := r.Header.Get("Authorization"); authorization != "" {
+			token := app.Bearer(authorization)
+			if !strings.HasPrefix(token, "apu_") || len(token) > 128 {
+				problem(w, http.StatusUnauthorized, "invalid portal token")
+				return
+			}
+			user, err = s.Store.UserForKey(r.Context(), keys.Digest(token))
+		} else if token := sessionToken(r); token != "" {
+			var account storage.PortalAccount
+			account, err = s.Store.PortalSession(r.Context(), keys.Digest(token))
+			user = account.ID
 		}
-		user, err := s.Store.UserForKey(r.Context(), keys.Digest(token))
-		if errors.Is(err, sql.ErrNoRows) {
-			problem(w, 401, "invalid portal token")
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && user == "") {
+			problem(w, http.StatusUnauthorized, "invalid portal session or token")
 			return
 		}
 		if err != nil {

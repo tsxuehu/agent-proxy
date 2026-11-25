@@ -113,10 +113,13 @@ func TestAgentProxyWithMySQLAndRedis(t *testing.T) {
 		"AGENT_RELAY_TOKEN=" + relayToken, "AGENT_CREDENTIAL_KEY=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{43}, 32)),
 		"AGENT_CODEX_BASE_URL=" + upstream.URL, "AGENT_CODEX_TOKEN_URL=" + upstream.URL + "/token",
 		"AGENT_CODEX_USAGE_URL=" + upstream.URL + "/usage", "AGENT_ACCOUNT_CONCURRENCY=4"}
-	adminURL := runApp(t, ctx, binaries["agent-admin"], env)
+	adminURL := runApp(t, ctx, binaries["agent-admin"], append(append([]string(nil), env...), "AGENT_ALLOW_SIGNUP=true"))
 	webEnv := append(append([]string(nil), env...), "AGENT_ADMIN_URL="+adminURL)
 	adminConsole := runApp(t, ctx, binaries["agent-admin-web"], webEnv)
 	userConsole := runApp(t, ctx, binaries["agent-portal"], webEnv)
+	secondAdminURL := runApp(t, ctx, binaries["agent-admin"], append(append([]string(nil), env...), "AGENT_ALLOW_SIGNUP=false"))
+	secondConsole := runApp(t, ctx, binaries["agent-portal"], append(append([]string(nil), env...), "AGENT_ADMIN_URL="+secondAdminURL))
+	t.Run("user center", func(t *testing.T) { testUserCenter(t, ctx, store, userConsole, secondConsole) })
 	newGateway := func() string {
 		t.Helper()
 		relayAddress := availableAddress(t)

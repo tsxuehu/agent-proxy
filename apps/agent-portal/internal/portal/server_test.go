@@ -36,4 +36,12 @@ func TestConsoleAppRoutes(t *testing.T) {
 	if api.Body.String() != "/user/v1/"+"endpoints?scope=all Bearer test" || api.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("console request was routed incorrectly: %s", api.Body.String())
 	}
+	crossOrigin := httptest.NewRequest(http.MethodDelete, "https://portal.example.com/api/auth/session", nil)
+	crossOrigin.Header.Set("Sec-Fetch-Site", "same-site")
+	crossOrigin.Header.Set("Origin", "https://other.example.com")
+	denied := httptest.NewRecorder()
+	app.ServeHTTP(denied, crossOrigin)
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin session mutation returned %d", denied.Code)
+	}
 }

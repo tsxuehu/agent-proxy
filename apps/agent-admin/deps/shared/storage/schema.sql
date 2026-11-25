@@ -53,6 +53,20 @@ CREATE TABLE IF NOT EXISTS portal_users (
     key_hash BINARY(32) UNIQUE NOT NULL
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS portal_accounts (
+    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    username VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin UNIQUE NOT NULL,
+    password_hash VARBINARY(64) NOT NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS portal_sessions (
+    token_hash BINARY(32) PRIMARY KEY,
+    account_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    INDEX account_sessions (account_id, expires_at),
+    FOREIGN KEY (account_id) REFERENCES portal_accounts(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS model_api_keys (
     id VARCHAR(64) PRIMARY KEY,
     provider VARCHAR(32) NOT NULL,

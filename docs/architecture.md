@@ -13,7 +13,7 @@
 | 应用边界 | 管理、接入网关、上游转发和计费是四个独立后端应用。用户控制台与系统管理控制台是两个独立前端应用。各应用分别构建镜像、部署 Deployment、暴露 Service 和扩缩容。 |
 | 服务形态 | Go 服务，部署在 Kubernetes。接入网关和上游转发至少运行两个副本，管理和计费按可用性与消费能力独立扩缩。HTTP 使用 `net/http`，内部流式调用使用支持双向流的协议。 |
 | 共享状态 | MySQL 保存持久化状态，Redis 协调跨副本并发和缓存。活跃 HTTP 流和 WebSocket 连接由当前实例持有。 |
-| 管理 | 用户在 `agent-portal` 管理自己的端点和 Key。管理员在 `agent-admin-web` 管理用户访问、上游模型 API Key 和订阅账号。两个前端调用 `agent-admin`，后者按用户或管理员令牌授权。 |
+| 管理 | 用户在 `agent-portal` 注册、登录和管理自己的端点与 Key。管理员在 `agent-admin-web` 管理控制台令牌、上游模型 API Key 和订阅账号。两个前端调用 `agent-admin`，后者验证用户会话或令牌并校验权限。 |
 
 ### Go monorepo
 
@@ -96,7 +96,7 @@ flowchart LR
     Operator["系统管理员"] --> AdminWeb["agent-admin-web"] -->|管理员 API| AdminSvc
 ```
 
-Kubernetes 独立部署四个后端和两个前端。用户控制台将用户令牌提交给管理 API，系统管理控制台使用单独的管理员令牌。`agent-forwarder` 首版启用 Codex OAuth 账号池，预留厂商模型 API 后端。OpenAI 官方模型 API 通过 `api.openai.com` 和 API Key 直接调用 GPT 系列模型。
+Kubernetes 独立部署四个后端和两个前端。管理 API 把用户密码的 Argon2id 哈希和有期限的会话摘要存入 MySQL，所有副本共用 Redis 登录与注册限速。浏览器通过 HTTPS Cookie 使用会话。控制台令牌登录继续可用，系统管理控制台使用独立的管理员令牌。`agent-forwarder` 首版启用 Codex OAuth 账号池，预留厂商模型 API 后端。OpenAI 官方模型 API 通过 `api.openai.com` 和 API Key 直接调用 GPT 系列模型。
 
 ### 2.2 agent-gateway 单个副本内部架构
 
@@ -158,7 +158,7 @@ flowchart TB
 | `agent-gateway` | 工具协议接入、端点鉴权、模型规则、请求预算和内部流转发。 |
 | `agent-forwarder` | 统一上游转发入口，内部包含 CodexPoolBackend 和 ModelAPIBackend，负责账号选择、凭据续期、重试、冷却、额度采样和上游错误分类。 |
 | `agent-billing` | 首版保留健康检查。后续接收用量事件，处理预检、窗口计数、账单和对账。 |
-| `agent-portal` | 用户端点、模型映射、上游选择、端点 Key 签发与轮换。 |
+| `agent-portal` | 用户注册、登录、退出，管理端点、模型映射和上游，签发与轮换端点 Key。 |
 | `agent-admin-web` | 用户令牌、Codex OAuth 账号与厂商模型 API Key 的管理界面。 |
 
 `agent-gateway` 到 `agent-forwarder` 使用 gRPC 双向流传递请求、响应事件和轮次结束信号，通过流上下文传播取消。`agent-admin` 写入 MySQL，网关和转发器读取端点版本与权限。后续计费设计采用短时 gRPC 预检与 Redis Stream 用量事件。

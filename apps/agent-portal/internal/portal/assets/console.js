@@ -4,28 +4,41 @@ const gateway = document.body.dataset.gateway;
 const statusNode = byID("status");
 let token = "";
 let editing = null;
+let authMode = "login";
+let signupEnabled = false;
 const backendNames = new Map();
 
 async function api(path, method = "GET", data = undefined) {
+  const headers = {};
+  if (token) headers.Authorization = "Bearer " + token;
+  if (data !== undefined) headers["Content-Type"] = "application/json";
   const response = await fetch("/api/" + path, {
     method,
-    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-    body: data === undefined ? undefined : typeof data === "string" ? data : JSON.stringify(data),
+    headers,
+    body: data === undefined ? undefined : JSON.stringify(data),
     cache: "no-store",
   });
   if (!response.ok) {
-    const message = await response.json().catch(() => ({}));
-    if (response.status === 401) {
-      token = "";
-      byID("workspace").hidden = true;
-    }
-    throw new Error(message.error || "请求失败（" + response.status + "）");
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 401 && !path.startsWith("auth/")) showSignedOut();
+    const messages = {
+      "invalid username or password": "用户名或密码不正确",
+      "invalid username or password format": "请检查用户名格式和密码长度",
+      "username already in use": "该用户名已被注册",
+      "registration disabled": "此站点暂未开放注册",
+      "invalid portal token": "控制台令牌无效",
+      "invalid portal session or token": "会话已失效或控制台令牌无效",
+      "too many attempts, try again later": "尝试次数过多，请稍后再试",
+      "authentication temporarily unavailable": "登录服务暂时不可用，请稍后再试",
+    };
+    throw new Error(messages[payload.error] || payload.error || "请求失败（" + response.status + "）");
   }
   return response.status === 204 ? null : response.json();
 }
 
 function report(message, error = false) {
   statusNode.textContent = message;
+  statusNode.hidden = !message;
   statusNode.dataset.error = String(error);
 }
 
@@ -35,10 +48,14 @@ function showSecret(label, value) {
   output.hidden = false;
 }
 
+function clearSecret() {
+  byID("secret").hidden = true;
+  byID("secret").textContent = "";
+}
+
 function run(action) {
   return async () => {
-    byID("secret").hidden = true;
-    byID("secret").textContent = "";
+    clearSecret();
     try {
       await action();
     } catch (error) {
@@ -142,9 +159,31 @@ async function loadEndpoints() {
   });
 }
 
-form("login", async (_, element) => {
-  token = byID("token").value.trim();
-  element.reset();
+function showAuthMode(mode) {
+  authMode = mode;
+  byID("auth-switch").hidden = !signupEnabled || mode === "token-login";
+  for (const id of ["login", "signup", "token-login"]) byID(id).hidden = id !== mode;
+  for (const button of byID("auth-switch").querySelectorAll("button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+  }
+  byID("auth-title").textContent = { login: "登录用户中心", signup: "注册账号", "token-login": "令牌登录" }[mode];
+  byID("auth-toggle").textContent = mode === "token-login" ? "返回账号登录" : "使用控制台令牌登录";
+}
+
+function showSignedOut() {
+  token = "";
+  editing = null;
+  byID("endpoints").replaceChildren();
+  byID("endpoint").reset();
+  byID("account-name").textContent = "";
+  byID("signed-in").hidden = true;
+  byID("workspace").hidden = true;
+  byID("auth").hidden = false;
+  clearSecret();
+  showAuthMode(authMode);
+}
+
+async function openWorkspace(username) {
   const options = byID("endpoint").elements.backend;
   const upstreams = await api("upstreams");
   options.replaceChildren();
@@ -156,9 +195,63 @@ form("login", async (_, element) => {
   }
   configureEndpoint(null);
   await loadEndpoints();
+  byID("account-name").textContent = username || "令牌会话";
+  byID("signed-in").hidden = false;
+  byID("auth").hidden = true;
   byID("workspace").hidden = false;
-  report("已连接");
+  report("");
+}
+
+for (const mode of ["login", "signup"]) {
+  form(mode, async (data, element) => {
+    const account = await api(mode === "signup" ? "auth/signup" : "auth/session", "POST", {
+      username: data.get("username"), password: data.get("password"),
+    });
+    element.reset();
+    signupEnabled = account.signup_enabled;
+    await openWorkspace(account.username);
+  });
+}
+
+form("token-login", async (data, element) => {
+  token = data.get("token").trim();
+  element.reset();
+  await openWorkspace("");
 });
+
+function changeAuthMode(mode) {
+  byID(authMode).reset();
+  showAuthMode(mode);
+  report("");
+  byID(mode).querySelector("input").focus();
+}
+
+byID("auth-toggle").addEventListener("click", () => changeAuthMode(authMode === "token-login" ? "login" : "token-login"));
+byID("auth-switch").addEventListener("click", (event) => {
+  if (event.target.dataset.mode) changeAuthMode(event.target.dataset.mode);
+});
+byID("logout").addEventListener("click", run(async () => {
+  if (!token) await api("auth/session", "DELETE");
+  authMode = "login";
+  showSignedOut();
+  report("已退出登录");
+}));
+
+run(async () => {
+  try {
+    const account = await api("auth/session");
+    signupEnabled = account.signup_enabled;
+    if (account.username) {
+      await openWorkspace(account.username);
+      return;
+    }
+  } catch (error) {
+    showSignedOut();
+    throw error;
+  }
+  showSignedOut();
+})();
+
 
 byID("cancel-edit").addEventListener("click", () => configureEndpoint(null));
 form("endpoint", async (data) => {

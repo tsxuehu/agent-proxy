@@ -1,6 +1,6 @@
 # agent-admin · 管理 API
 
-管理用户令牌、接入端点、客户端 Key、Codex OAuth 账号和厂商模型 API Key。该工程负责初始化共享 MySQL 表。
+管理用户账号、登录会话、控制台令牌、接入端点、客户端 Key、Codex OAuth 账号和厂商模型 API Key。该工程负责初始化共享 MySQL 表。
 
 ## 构建与运行
 
@@ -19,6 +19,8 @@ kubectl kustomize deploy/k8s
 | 环境变量 | 用途 |
 | --- | --- |
 | `AGENT_MYSQL_DSN` | 共享 MySQL DSN |
+| `AGENT_REDIS_URL` | 密码登录和注册共用的限速状态，默认 `redis://localhost:6379/0` |
+| `AGENT_ALLOW_SIGNUP` | `true` 开放用户自助注册，默认 `false` |
 | `AGENT_ADMIN_TOKEN` | 管理 API 令牌 |
 | `AGENT_CREDENTIAL_KEY` | Base64 编码的 32 字节凭据主密钥 |
 

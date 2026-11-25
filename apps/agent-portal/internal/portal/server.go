@@ -54,12 +54,17 @@ func console(target *url.URL, gateway string) http.Handler {
 		_ = page.Execute(w, data)
 	})
 	mux.Handle("/api/{operation...}", proxy)
+	sameOrigin := http.NewCrossOriginProtection()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
+			if err := sameOrigin.Check(r); err != nil {
+				http.Error(w, "cross-origin request denied", http.StatusForbidden)
+				return
+			}
 			for _, part := range strings.Split(r.URL.Path, "/") {
 				if part == "." || part == ".." {
 					http.Error(w, "invalid path", 400)

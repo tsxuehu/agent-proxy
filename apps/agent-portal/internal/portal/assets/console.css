@@ -16,7 +16,19 @@ input:not([type="checkbox"]), textarea, select { border: 1px solid #9eafb2; bord
 button { border: 0; border-radius: 6px; padding: 9px 14px; background: #12675f; color: #fff; cursor: pointer; font-weight: 600; }
 button.secondary { background: #eaf2f1; color: #18483f; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #10736a; outline-offset: 2px; }
-.login { max-width: 530px; }
+.account { margin-left: auto; display: flex; align-items: center; gap: 12px; min-width: 0; }
+#account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account button { flex-shrink: 0; }
+.auth { width: min(100%, 420px); margin: clamp(22px, 6vh, 64px) auto 0; padding: clamp(20px, 5vw, 32px); }
+.auth h1 { margin: 0 0 20px; font-size: 26px; }
+.auth-form { display: grid; gap: 16px; }
+.auth-form .muted { line-height: 1.5; font-size: 12px; font-weight: 400; }
+.auth-switch { display: flex; gap: 4px; background: #edf3f2; border-radius: 8px; padding: 4px; margin-bottom: 24px; }
+.auth-switch button { flex: 1; background: transparent; color: #18483f; }
+.auth-switch button[aria-pressed="true"] { background: #fff; box-shadow: 0 1px 3px #16252b20; }
+.text-button { margin-top: 14px; padding-left: 0; color: #12675f; background: transparent; }
+.auth:not([hidden]) + #status { width: min(100%, 420px); margin: 14px auto; }
+button:disabled { opacity: .55; cursor: default; }
 .inline { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .fields { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
 .fields label { flex: 1 1 175px; }
@@ -30,3 +42,8 @@ td code { overflow-wrap: anywhere; }
 .muted, #status { color: #475d62; }
 #status[data-error="true"] { color: #a32328; }
 .secret { display: block; padding: 14px; border: 1px solid #88b3a5; border-radius: 6px; background: #e2f4ed; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .wrap { width: calc(100% - 28px); }
+  .masthead .wrap { gap: 10px; flex-wrap: wrap; }
+  .masthead .wrap > span { display: none; }
+}

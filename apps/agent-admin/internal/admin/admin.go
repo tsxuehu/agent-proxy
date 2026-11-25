@@ -19,6 +19,7 @@ type Server struct {
 	Store *storage.Store
 	Vault keys.Vault
 	Token string
+	Auth  *UserAuth
 }
 
 var userPattern = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,128}$`)
@@ -36,6 +37,10 @@ func (s Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/v1/model-keys", s.protect(s.modelKeys))
 	mux.HandleFunc("POST /admin/v1/model-keys", s.protect(s.addModelKey))
 	mux.HandleFunc("DELETE /admin/v1/model-keys/{id}", s.protect(s.deleteModelKey))
+	mux.HandleFunc("POST /user/v1/auth/signup", s.signup)
+	mux.HandleFunc("POST /user/v1/auth/session", s.login)
+	mux.HandleFunc("GET /user/v1/auth/session", s.session)
+	mux.HandleFunc("DELETE /user/v1/auth/session", s.logout)
 	mux.HandleFunc("GET /user/v1/upstreams", s.userOnly(s.upstreams))
 	mux.HandleFunc("POST /user/v1/endpoints", s.userOnly(s.createEndpoint))
 	mux.HandleFunc("GET /user/v1/endpoints", s.userOnly(s.listEndpoints))
