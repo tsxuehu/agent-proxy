@@ -10,14 +10,14 @@
 | 用户端点 | 一个 Agent Proxy 用户可创建多个接入端点。每个端点配置接入协议、目标上游和模型别名，并单独发放客户端 Key。 |
 | 转发后端 | 首版仅启用 Codex OAuth 账号池。Claude Code 请求经协议转换后也进入这个池。 |
 | 扩展范围 | 后续接入 Claude Code 订阅账号池，以及 OpenAI、DeepSeek 和智谱 GLM 的模型 API 直连。首版的 Claude Code 模型别名只映射到明确配置的 Codex 模型。 |
-| 应用边界 | 管理、接入网关、上游转发和计费是四个独立应用，分别构建镜像、部署 Deployment、暴露 Service 和扩缩容。 |
+| 应用边界 | 管理、接入网关、上游转发和计费是四个独立后端应用。用户控制台与系统管理控制台是两个独立前端应用。各应用分别构建镜像、部署 Deployment、暴露 Service 和扩缩容。 |
 | 服务形态 | Go 服务，部署在 Kubernetes。接入网关和上游转发至少运行两个副本，管理和计费按可用性与消费能力独立扩缩。HTTP 使用 `net/http`，内部流式调用使用支持双向流的协议。 |
 | 共享状态 | MySQL 保存持久化状态，Redis 协调跨副本并发和缓存。活跃 HTTP 流和 WebSocket 连接由当前实例持有。 |
-| 管理 | 用户通过受保护的管理接口配置自己的端点和 Key。管理员负责上游配置、访问授权和订阅账号维护。 |
+| 管理 | 用户在 `agent-portal` 管理自己的端点和 Key。管理员在 `agent-admin-web` 管理用户访问、上游模型 API Key 和订阅账号。两个前端调用 `agent-admin`，后者按用户或管理员令牌授权。 |
 
 ### Go monorepo
 
-仓库使用一个 Go module。`cmd/` 为四个应用提供独立入口，`internal/` 存放各应用实现与共享基础设施，`api/` 保存内部协议契约，`deploy/` 保存部署配置。应用之间通过服务协议交互。四个镜像可独立构建、发布与扩缩容。
+仓库使用一个 Go module。`cmd/` 为四个后端和两个前端提供独立入口。`internal/` 存放各应用实现与共享基础设施，`api/` 保存内部协议契约，`deploy/` 保存部署配置。两个前端分别运行 Go Web 进程，静态资源随镜像交付。六个镜像可独立构建、发布与扩缩容。
 
 本轮实施将 `agent-billing` 保留为健康检查占位应用。额度预检、用量事件消费、账单和对账是后续设计，当前推理请求不调用计费应用。
 
@@ -65,13 +65,7 @@ flowchart LR
         ForwarderSvc --> ForwarderB
     end
 
-    subgraph BillingApp["应用四 · agent-billing"]
-        BillingA["计费 Pod A"]
-        BillingB["计费 Pod B"]
-        BillingSvc["agent-billing Service"]
-        BillingSvc --> BillingA
-        BillingSvc --> BillingB
-    end
+    BillingSvc["agent-billing · 预留应用"]
 
     LB --> GatewaySvc
 
@@ -90,22 +84,19 @@ flowchart LR
 
     GatewayA -->|读取端点和授权| MySQL
     GatewayB -->|读取端点和授权| MySQL
-    GatewayA -->|并发租约和缓存| Redis
-    GatewayB -->|并发租约和缓存| Redis
     AdminAPI -->|管理配置| MySQL
-    GatewaySvc -->|内部双向流| ForwarderSvc
-    GatewaySvc -->|计费预检和用量事件| BillingSvc
-    BillingA -->|账单和额度状态| MySQL
-    BillingB -->|账单和额度状态| MySQL
-    BillingA -->|实时额度和窗口计数| Redis
-    BillingB -->|实时额度和窗口计数| Redis
+    GatewayApp -->|内部双向流| ForwarderSvc
+    ForwarderApp -->|账号、凭据和会话状态| MySQL
+    ForwarderApp -->|跨副本并发租约| Redis
+    GatewaySvc -. 后续计费 .-> BillingSvc
     CodexBackend -->|OAuth 账号池| CodexUpstream
     CodexBackend -. 后续 .-> ClaudeUpstream
     ModelBackend -. 后续 .-> ModelAPIs
-    Admin["管理客户端"] -->|私有管理 API| AdminSvc
+    User["普通用户"] --> Portal["agent-portal"] -->|用户 API| AdminSvc
+    Operator["系统管理员"] --> AdminWeb["agent-admin-web"] -->|管理员 API| AdminSvc
 ```
 
-系统由四个独立应用组成。`agent-gateway` 接收工具请求，`agent-admin` 管理用户、端点和配置，`agent-forwarder` 承担上游转发，`agent-billing` 负责用量、额度和账单。四个应用在 Kubernetes 中分别运行 Deployment。`agent-forwarder` 内部包含 CodexPoolBackend 和 ModelAPIBackend 两类后端，按端点配置选择。网关和转发器之间使用内部双向流，计费事件异步写入队列，避免账单处理阻塞流式请求。OpenAI 官方模型 API 通过 `api.openai.com` 和 API Key 直接调用 GPT 系列模型。
+Kubernetes 独立部署四个后端和两个前端。用户控制台将用户令牌提交给管理 API，系统管理控制台使用单独的管理员令牌。`agent-forwarder` 首版启用 Codex OAuth 账号池，预留厂商模型 API 后端。OpenAI 官方模型 API 通过 `api.openai.com` 和 API Key 直接调用 GPT 系列模型。
 
 ### 2.2 agent-gateway 单个副本内部架构
 
@@ -117,19 +108,14 @@ flowchart TB
     subgraph Replica["agent-gateway · 单个 Pod"]
         Ingress["工具接入层<br/>Responses / Messages"]
         Routes["端点路由<br/>归属、Key、模型规则、目标后端"]
-        Runner["轮次执行器<br/>流式回传、重试预算与用量结算"]
-        Admission["计费预检与用量事件"]
+        Runner["轮次执行器<br/>流式回传、超时和取消"]
 
         Ingress --> Routes --> Runner
-        Runner -->|申请用户侧准入| Admission
         Runner -->|内部双向流| Forwarder["agent-forwarder Service"]
-        Runner -->|发送结算事件| Admission
     end
 
     LB --> Ingress
     Routes -->|读取端点配置| MySQL[("共享 MySQL")]
-    Routes -->|读取缓存和版本| Redis[("共享 Redis")]
-    Admission -->|预检和事件| Billing["agent-billing Service"]
 ```
 
 图框内的模块随 `agent-gateway` 的每个 Pod 部署。网关不直接保存上游 OAuth 账号，也不直接访问外部模型服务。轮次执行器通过内部双向流调用 `agent-forwarder`，由转发器负责账号池和模型 API。一个用户配置的多个端点由同一个路由模块处理。
@@ -169,17 +155,19 @@ flowchart TB
 | 应用 | 职责 |
 | --- | --- |
 | `agent-admin` | 用户、端点、客户端 Key、上游配置、Codex 账号授权和管理操作。写入 MySQL，并发布配置变更。 |
-| `agent-gateway` | 工具协议接入、端点鉴权、模型规则、请求预算、内部流转发、计费预检和用量事件。 |
+| `agent-gateway` | 工具协议接入、端点鉴权、模型规则、请求预算和内部流转发。 |
 | `agent-forwarder` | 统一上游转发入口，内部包含 CodexPoolBackend 和 ModelAPIBackend，负责账号选择、凭据续期、重试、冷却、额度采样和上游错误分类。 |
-| `agent-billing` | 接收用量事件，执行额度预检和窗口计数，生成用量明细、账单和对账结果。 |
+| `agent-billing` | 首版保留健康检查。后续接收用量事件，处理预检、窗口计数、账单和对账。 |
+| `agent-portal` | 用户端点、模型映射、上游选择、端点 Key 签发与轮换。 |
+| `agent-admin-web` | 用户令牌、Codex OAuth 账号与厂商模型 API Key 的管理界面。 |
 
-应用间协议固定为以下三类。`agent-gateway` 到 `agent-forwarder` 使用带 protobuf schema 的 gRPC 双向流，传递请求、响应事件、取消、终止和错误分类。`agent-gateway` 到 `agent-billing` 使用短时 gRPC 预检，使用 Redis Stream 投递最终用量事件。`agent-admin` 通过管理 API 接收操作，写入 MySQL 后发布配置版本变更，网关和转发器按版本读取新配置。
+`agent-gateway` 到 `agent-forwarder` 使用 gRPC 双向流传递请求、响应事件和轮次结束信号，通过流上下文传播取消。`agent-admin` 写入 MySQL，网关和转发器读取端点版本与权限。后续计费设计采用短时 gRPC 预检与 Redis Stream 用量事件。
 
 | 网关内部模块 | 职责 |
 | --- | --- |
 | 工具接入层 | 提供各工具所需的 HTTP 和 WebSocket 协议，校验客户端 Key 和模型范围，提取会话信息，转换请求、响应、流事件和错误。 |
 | 端点路由 | 用端点 ID 加载用户、接入协议和目标上游的绑定。校验 Key 是否属于该端点，以及用户是否仍有权使用目标上游。 |
-| 轮次执行器 | 申请和释放用户侧并发槽。维护请求预算、输出提交边界、重试条件、故障反馈和用量事件。 |
+| 轮次执行器 | 转发轮次与取消信号，限制请求时间，按客户端协议返回流式错误。 |
 | 内部流客户端 | 通过双向流调用 `agent-forwarder`，转发正文、流事件、取消、重试和终止信号。 |
 
 接入协议与后端是两个独立维度。Codex 客户端保留原生字段和事件顺序。Claude Code 的 Messages 入口将受支持的消息、工具调用和工具结果转换为 Codex Responses，再把上游流映射回 Messages SSE。模型别名按端点配置，未配置的模型或无法映射的能力返回对应协议的错误。Claude Code 路径的会话和上下文由该入口适配，共享底层账号池和额度。
@@ -195,7 +183,6 @@ sequenceDiagram
     participant Client as 工具客户端
     participant LB as 负载均衡器
     participant Gateway as agent-gateway
-    participant Billing as agent-billing
     participant Forwarder as agent-forwarder
     participant Upstream as 选定的上游
 
@@ -208,18 +195,17 @@ sequenceDiagram
     else Claude Code
         Gateway->>Gateway: 将 Messages 和模型别名转换为 Responses
     end
-    Gateway->>Billing: 预检用户和端点额度
-    Billing-->>Gateway: 返回准入结果与租约
+    Gateway->>Forwarder: 建立内部双向流，发送轮次请求
+    Forwarder->>Forwarder: 选择账号，申请用户与账号并发槽
     alt 可获得账号与租约
-        Gateway->>Forwarder: 建立内部双向流，发送请求和取消信号
         Forwarder->>Upstream: 选择后端和账号后发送请求
         Upstream-->>Forwarder: 返回响应或流事件
         Forwarder-->>Gateway: 转交流事件或上游错误分类
         Note over Gateway,Forwarder: 提交前且满足安全重试条件时，由转发器在预算内重选账号
         Gateway-->>Client: 通过负载均衡器传回客户端协议的响应
-        Gateway->>Billing: 异步发送用量和结果事件
+        Forwarder->>Forwarder: 释放本轮并发槽
     else 账号池或依赖暂不可用
-        Billing-->>Gateway: 返回限流或暂不可用
+        Forwarder-->>Gateway: 返回限流或暂不可用
         Gateway-->>Client: 通过负载均衡器返回协议错误
     end
 ```
@@ -268,12 +254,14 @@ sequenceDiagram
 
 | Deployment | 副本与职责 | 对外或内部接口 |
 | --- | --- | --- |
-| `agent-gateway` | 至少 2 个 Pod，处理 Codex、Claude Code 和后续工具请求。持有客户端连接和内部转发流。 | 只通过 Ingress 或 Gateway API 对外。调用 `agent-billing` 和 `agent-forwarder` 的 ClusterIP Service。 |
+| `agent-gateway` | 至少 2 个 Pod，处理 Codex、Claude Code 和后续工具请求。持有客户端连接和内部转发流。 | 通过 Ingress 或 Gateway API 对外。调用 `agent-forwarder` 的集群内 gRPC Service。 |
 | `agent-admin` | 至少 2 个 Pod，处理用户、端点、Key、上游配置和账号管理。 | 只通过管理员入口或私有 Service 对外，不接收推理流量。 |
 | `agent-forwarder` | 至少 2 个 Pod，处理 CodexPoolBackend 和 ModelAPIBackend。 | 只暴露集群内双向流 Service，不直接对公网开放。 |
-| `agent-billing` | 至少 2 个 Pod，处理预检、用量事件、窗口额度和账单。 | 提供集群内预检接口，消费用量事件，不接收客户端流。 |
+| `agent-billing` | 首版运行健康检查占位。 | 集群内 HTTP 健康检查。 |
+| `agent-portal` | 用户控制台，转接管理应用的用户 API。 | 用户 Web 入口。 |
+| `agent-admin-web` | 系统管理控制台，转接管理应用的管理员 API。 | 受限 Web 入口。 |
 
-四个应用分别构建镜像和发布。`agent-gateway` 的 Pod 不直接访问外部上游。`agent-forwarder` 的 Pod 不暴露管理接口。`agent-billing` 的账单入库采用异步事件，预检只返回是否允许建立轮次和需要持有的额度租约。
+所有应用分别构建镜像和发布。外部推理流量由 `agent-gateway` 接收，上游访问由 `agent-forwarder` 发起。转发器通过 Headless Service 发现多个副本，网关的新 gRPC 流在可用副本间分配。
 
 - **入口和流。** Ingress 或 Gateway API 负责 TLS、WebSocket Upgrade、SSE 禁用响应缓冲和连接空闲超时。`agent-gateway` Pod 重启时，客户端连接按协议重连。网关到转发器使用内部双向流，传递请求、流事件、取消、终止和错误分类。
 - **健康检查。** 每个 Deployment 提供 `/healthz` 和 `/readyz`。`/readyz` 检查 MySQL、Redis 和必要的内部 Service。`agent-forwarder` 还检查上游凭据存储是否可读取。账号池全部限流时保持进程就绪，按请求返回 `429`。
@@ -287,9 +275,9 @@ sequenceDiagram
 
 | 阶段 | 交付与验收 |
 | --- | --- |
-| 1. 四应用骨架 | 创建 `agent-admin`、`agent-gateway`、`agent-forwarder` 和 `agent-billing` 四个 Go 应用及 Kubernetes Deployment、Service、Secret、ConfigMap、NetworkPolicy 和健康检查。先打通 MySQL、Redis 和内部认证。 |
+| 1. 应用骨架 | 创建四个后端、两个前端，以及 Kubernetes 部署和独立的数据库初始化 Job。先打通 MySQL、Redis 和内部认证。 |
 | 2. Codex 数据面 | 实现 `agent-gateway` 的端点 Key、Responses HTTP/SSE、模型目录和 compact，以及 `agent-forwarder` 的 CodexPoolBackend。在双副本环境验证内部双向流和配置读取。 |
-| 3. 稳定账号池与计费 | 实现跨副本续期与并发租约、WebSocket 多轮、会话绑定、账号级及模型级冷却、安全换号、计费预检和用量事件。验证 billing 积压时不重复结算。 |
+| 3. 稳定账号池 | 实现跨副本续期与并发租约、WebSocket 多轮、会话绑定、账号级及模型级冷却和安全换号。 |
 | 4. Claude Code 接入与首版验收 | 增加 Messages 转换和显式模型别名，用两种客户端在多副本环境完成验收。两个入口共用同一 Codex OAuth 池。 |
 | 后续扩展 | 增加 DeepSeek Harness 等接入协议、其他订阅账号池或厂商模型 API。需要独立扩缩时再拆分 `agent-forwarder` 内的后端 Deployment。 |
 
@@ -298,4 +286,4 @@ sequenceDiagram
 3. 用 Kubernetes 多副本验证流量分配、摘流和滚动升级，确认旧连接可以排空，新连接可以进入其他健康副本。
 4. 固定两个客户端的版本，分别记录模拟测试和真实账号的受控验收结果。跨副本续期、冷却传播、并发竞争和存储故障使用 [池化验收用例](account-pooling.md#5-池化验收)。
 5. 验证同一用户创建多个端点、同协议端点独立选上游、端点 Key 无法跨端点调用。用两个模拟后端验证端点改绑、旧 WebSocket 重连和会话索引隔离。
-6. 验证 `agent-billing` 消费延迟、Redis 故障转移、MySQL 短时不可用、Pod 重启和内部 Service 失败。请求在预算内退出，租约可以回收，用量只结算一次。
+6. 验证 Redis 故障转移、MySQL 短时不可用、Pod 重启和内部 Service 失败。请求在预算内退出，租约可以回收。

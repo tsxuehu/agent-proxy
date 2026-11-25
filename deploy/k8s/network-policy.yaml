@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forwarder-from-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: agent-forwarder
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: agent-gateway
+      ports:
+        - port: 9090
+          protocol: TCP

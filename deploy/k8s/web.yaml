@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-portal
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agent-portal
+  template:
+    metadata:
+      labels:
+        app: agent-portal
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: agent-portal:dev
+          env:
+            - name: AGENT_ADMIN_URL
+              value: http://agent-admin:8081
+            - name: AGENT_GATEWAY_PUBLIC_URL
+              value: https://proxy.example.com
+          ports:
+            - name: http
+              containerPort: 8084
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-portal
+spec:
+  selector:
+    app: agent-portal
+  ports:
+    - port: 8084
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-admin-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agent-admin-web
+  template:
+    metadata:
+      labels:
+        app: agent-admin-web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: agent-admin-web:dev
+          env:
+            - name: AGENT_ADMIN_URL
+              value: http://agent-admin:8081
+            - name: AGENT_GATEWAY_PUBLIC_URL
+              value: https://proxy.example.com
+          ports:
+            - name: http
+              containerPort: 8085
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-admin-web
+spec:
+  selector:
+    app: agent-admin-web
+  ports:
+    - port: 8085
+      targetPort: http
