@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-forwarder
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agent-forwarder
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: agent-forwarder
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: agent-forwarder
+      containers:
+        - name: app
+          image: agent-forwarder:dev
+          ports:
+            - name: http
+              containerPort: 8082
+            - name: grpc
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: AGENT_MYSQL_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-proxy
+                  key: AGENT_MYSQL_DSN
+            - name: AGENT_RELAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-proxy
+                  key: AGENT_RELAY_TOKEN
+            - name: AGENT_CREDENTIAL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-proxy
+                  key: AGENT_CREDENTIAL_KEY
+            - name: AGENT_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agent-proxy
+                  key: AGENT_REDIS_URL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-forwarder
+spec:
+  clusterIP: None
+  selector:
+    app: agent-forwarder
+  ports:
+    - name: grpc
+      port: 9090
+      targetPort: grpc
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agent-forwarder
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: agent-forwarder

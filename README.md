@@ -2,7 +2,7 @@
 
 面向 AI 编程工具的自托管代理。首版通过 Codex OAuth 账号池转发 Codex CLI 和 Claude Code，请求按用户端点路由。
 
-## 应用
+## Monorepo 工程
 
 | 入口 | 职责 | 默认端口 |
 | --- | --- | --- |
@@ -12,6 +12,12 @@
 | `agent-gateway` | Codex Responses 和 Claude Code Messages 协议入口 | 8080 |
 | `agent-forwarder` | 内部 gRPC 转发、Codex 调度和续期 | 9090，探针 8082 |
 | `agent-billing` | 预留的计费应用，提供健康检查 | 8083 |
+
+每个部署单元位于 `apps/<应用名>/`，拥有自己的 Go module、源码、测试、Dockerfile 和 Kubernetes 清单。根目录的 `go.work` 用于联合开发。根目录 `deploy/` 的 Kustomize 配置组合各应用的清单。
+
+共享协议与基础库的源码位于 `shared/`。各应用在 `deps/shared/` 随附自己的依赖副本，独立构建使用目录内的副本。联合开发通过 `go.work` 直接读取 `shared/`。修改共享源码后运行 `go run ./tools/sync-shared/main.go` 更新副本，将共享变更和对应副本一起提交。使用 `go run ./tools/sync-shared/main.go -check` 检查同步。
+
+迁出时可以单独复制 `apps/<应用名>/`，或者用 `git subtree split --prefix apps/agent-gateway -b split/agent-gateway` 保留该目录的提交历史。迁出的工程可以继续使用随附依赖，运行时仍通过配置连接需要的外部服务。
 
 ## 本地启动
 
@@ -29,11 +35,11 @@
 | `AGENT_GATEWAY_PUBLIC_URL` | 用户控制台显示的网关地址。默认 `http://localhost:8080`。 |
 
 ```sh
-go run ./cmd/agent-admin migrate
-go run ./cmd/agent-admin
+go run ./apps/agent-admin migrate
+go run ./apps/agent-admin
 ```
 
-在另外的终端启动 `agent-forwarder`、`agent-gateway`、`agent-admin-web` 和 `agent-portal`，例如 `go run ./cmd/agent-forwarder`。计费占位应用可按需启动。初始数据库结构由 migrate 命令创建。
+在另外的终端启动 `agent-forwarder`、`agent-gateway`、`agent-admin-web` 和 `agent-portal`，例如 `go run ./apps/agent-forwarder`。计费占位应用可按需启动。初始数据库结构由 migrate 命令创建。
 
 1. 打开 `http://localhost:8085`，用管理员令牌登录。导入获准使用的 Codex OAuth 凭据 JSON，支持 Codex CLI 的 `auth.json` 或含相同字段的导出文件。代理应是该上游刷新令牌的唯一使用方。
 2. 在系统管理控制台为用户签发控制台令牌。令牌只显示一次。替换控制台令牌后，旧令牌失效。
@@ -44,10 +50,11 @@ go run ./cmd/agent-admin
 
 ## Kubernetes
 
-每个应用使用同一个构建文件和不同的 `APP`。构建、推送六个镜像，并用部署环境的镜像名或 digest 覆盖 Kustomize 基础清单中的 `:dev` 镜像名。
+每个应用从自己的工程目录构建镜像。用部署环境的镜像名或 digest 覆盖各 Kustomize 基础清单中的 `:dev` 镜像名。可以单独部署一个应用，也可以使用根目录的 `deploy/k8s` 组合部署。
 
 ```sh
-docker build --build-arg APP=agent-gateway -t registry.example.com/agent-gateway:VERSION .
+docker build -t registry.example.com/agent-gateway:VERSION ./apps/agent-gateway
+kubectl kustomize apps/agent-gateway/deploy/k8s
 kubectl kustomize deploy/migrate
 kubectl kustomize deploy/k8s
 ```
@@ -59,11 +66,10 @@ MySQL 和 Redis 由目标环境提供。基础清单不创建公共入口或生�
 ## 验证
 
 ```sh
-go test ./...
-go vet ./...
-go build ./...
+go run ./tools/sync-shared/main.go -check
+go test ./apps/agent-admin/... ./apps/agent-gateway/... ./apps/agent-forwarder/... ./apps/agent-billing/... ./apps/agent-portal/... ./apps/agent-admin-web/...
 ```
 
-设置 `AGENT_TEST_MYSQL_DSN` 和 `AGENT_TEST_REDIS_URL` 指向专用临时测试库，再运行 `go test -count=1 ./internal/integration`。集成测试使用模拟 Codex 和 OAuth 上游。
+在单个应用目录内关闭 workspace 后，可以运行 `go test ./...`、`go vet ./...` 和 `go build .`。跨应用集成测试使用模拟 Codex 和 OAuth 上游。设置 `AGENT_TEST_MYSQL_DSN` 和 `AGENT_TEST_REDIS_URL` 指向专用临时测试库，再运行 `go test -count=1 ./tests/integration`。测试关闭 workspace，独立构建服务并通过 HTTP 和 gRPC 验证组合行为。
 
 [系统架构](docs/architecture.md) · [账号池设计](docs/account-pooling.md)

@@ -1,0 +1,13 @@
+go 1.25.13
+
+use (
+	./apps/agent-admin
+	./apps/agent-admin-web
+	./apps/agent-billing
+	./apps/agent-forwarder
+	./apps/agent-gateway
+	./apps/agent-portal
+	./tests/integration
+)
+
+replace github.com/tsxuehu/agent-proxy/shared => ./shared

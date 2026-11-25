@@ -1,0 +1,32 @@
+* { box-sizing: border-box; }
+:root { color: #1b2832; background: #f3f6f7; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+.wrap { width: min(1050px, calc(100% - 40px)); margin: 0 auto; }
+.masthead { background: #16252b; color: #cbddd9; padding: 17px 0; }
+.masthead .wrap { display: flex; align-items: center; gap: 20px; }
+.masthead a { color: #fff; text-decoration: none; font-weight: 700; }
+main { padding: 30px 0 50px; }
+h1 { margin: 0 0 24px; font-size: 32px; }
+h2 { margin: 0 0 17px; font-size: 20px; }
+section { border: 1px solid #dce5e5; border-radius: 12px; padding: 22px; background: #fff; margin: 20px 0; }
+label { display: grid; gap: 7px; font-size: 14px; font-weight: 600; }
+input, select, textarea, button { font: inherit; }
+input:not([type="checkbox"]), textarea, select { border: 1px solid #9eafb2; border-radius: 6px; padding: 8px 10px; width: 100%; color: inherit; min-width: 0; background: #fff; }
+button { border: 0; border-radius: 6px; padding: 9px 14px; background: #12675f; color: #fff; cursor: pointer; font-weight: 600; }
+button.secondary { background: #eaf2f1; color: #18483f; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #10736a; outline-offset: 2px; }
+.login { max-width: 530px; }
+.inline { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.fields { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+.fields label { flex: 1 1 175px; }
+.fields .wide { flex-basis: 100%; }
+.fields .inline { flex: 0 0 auto; align-self: center; }
+.table-area { overflow-x: auto; margin-top: 18px; }
+table { border-collapse: collapse; width: 100%; text-align: left; }
+th, td { padding: 11px 8px; border-bottom: 1px solid #e2e9e9; font-size: 14px; }
+td button { margin: 0 4px 4px 0; padding: 6px 8px; white-space: nowrap; }
+td code { overflow-wrap: anywhere; }
+.muted, #status { color: #475d62; }
+#status[data-error="true"] { color: #a32328; }
+.secret { display: block; padding: 14px; border: 1px solid #88b3a5; border-radius: 6px; background: #e2f4ed; overflow-wrap: anywhere; }
